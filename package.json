@@ -1,0 +1,20 @@
+{
+  "name": "tvmix-worker",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Worker ARM64 per la transcodifica HLS dei video TVMIX",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node src/worker.js",
+    "enqueue": "node src/enqueue.js",
+    "check": "node --check src/worker.js && node --check src/enqueue.js"
+  },
+  "dependencies": {
+    "bullmq": "^5.58.5",
+    "dotenv": "^17.2.2",
+    "ioredis": "^5.7.0"
+  }
+}

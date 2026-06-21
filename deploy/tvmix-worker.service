@@ -1,0 +1,24 @@
+[Unit]
+Description=TVMIX ARM64 HLS transcoding worker
+After=network-online.target redis-server.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=tvmix
+Group=tvmix
+WorkingDirectory=/opt/tvmix-worker
+EnvironmentFile=/opt/tvmix-worker/.env
+ExecStart=/usr/bin/node /opt/tvmix-worker/src/worker.js
+Restart=always
+RestartSec=5
+TimeoutStopSec=1800
+KillSignal=SIGTERM
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ReadWritePaths=/srv/tvmix/uploads /srv/tvmix/hls
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target
