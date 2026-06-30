@@ -262,6 +262,12 @@ async function processVideo(job) {
       videoId,
       status: "ready",
       masterUrl,
+      title: job.data?.title,
+      slug: job.data?.slug,
+      description: job.data?.description,
+      thumbnailUrl: job.data?.thumbnailUrl,
+      categorySlug: job.data?.categorySlug,
+      categoryName: job.data?.categoryName,
       durationSeconds: metadata.duration,
       source: {
         width: metadata.width,

@@ -53,14 +53,20 @@ Dal backend si deve aggiungere alla coda `tvmix-video-transcoding` un job con:
 ```json
 {
   "videoId": "abc123",
-  "sourcePath": "/srv/tvmix/uploads/abc123.mp4"
+  "sourcePath": "/srv/tvmix/uploads/abc123.mp4",
+  "title": "Titolo video",
+  "slug": "titolo-video",
+  "description": "Descrizione pubblica",
+  "thumbnailUrl": "https://media.tvmix.it/poster/abc123.jpg",
+  "categorySlug": "on-demand",
+  "categoryName": "On demand"
 }
 ```
 
 Per una prova locale:
 
 ```bash
-npm run enqueue -- abc123 /srv/tvmix/uploads/abc123.mp4
+npm run enqueue -- abc123 /srv/tvmix/uploads/abc123.mp4 '{"title":"Titolo video","categorySlug":"on-demand"}'
 ```
 
 L'output viene pubblicato in:
@@ -83,6 +89,8 @@ Al termine il worker invia `POST WEBHOOK_URL` con un payload simile:
   "videoId": "abc123",
   "status": "ready",
   "masterUrl": "https://media.tvmix.it/hls/abc123/master.m3u8",
+  "title": "Titolo video",
+  "categorySlug": "on-demand",
   "durationSeconds": 125.4,
   "completedAt": "2026-06-21T12:00:00.000Z",
   "worker": "TVMIX-WORKER"
