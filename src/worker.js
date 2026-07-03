@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import crypto from "node:crypto";
-import { createReadStream } from "node:fs";
+import { createReadStream, createWriteStream } from "node:fs";
 import {
   access,
   readdir,
@@ -11,9 +11,10 @@ import {
   unlink
 } from "node:fs/promises";
 import path from "node:path";
-import { PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
+import { GetObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { Queue, Worker } from "bullmq";
 import IORedis from "ioredis";
+import { pipeline } from "node:stream/promises";
 import { config } from "./config.js";
 
 const RENDITIONS = [
@@ -224,6 +225,14 @@ function r2Key(relativePath) {
   return config.r2.prefix ? `${config.r2.prefix}/${normalized}` : normalized;
 }
 
+function stripR2Prefix(objectKey) {
+  const normalized = String(objectKey ?? "").replace(/^\/+/, "");
+  const prefix = config.r2.prefix ? `${config.r2.prefix}/` : "";
+  return prefix && normalized.startsWith(prefix)
+    ? normalized.slice(prefix.length)
+    : normalized;
+}
+
 function contentTypeFor(filePath) {
   const extension = path.extname(filePath).toLowerCase();
   if (extension === ".m3u8") return "application/vnd.apple.mpegurl";
@@ -272,6 +281,30 @@ async function uploadHlsToR2(videoId, finalDir) {
   return `${config.r2.publicUrl}/${r2Key(`hls/${videoId}/master.m3u8`)}`;
 }
 
+async function resolveSourcePath(job, videoId) {
+  const sourceObjectKey = job.data?.sourceObjectKey;
+  if (sourceObjectKey && r2) {
+    const relativeObjectKey = stripR2Prefix(sourceObjectKey);
+    const extension = path.extname(relativeObjectKey) || ".mp4";
+    const localSource = pathInside(config.inputRoot, path.join(".r2-cache", `${videoId}${extension}`));
+    await mkdir(path.dirname(localSource), { recursive: true });
+    await job.updateProgress({ phase: "downloading-r2-source" });
+    const response = await r2.send(new GetObjectCommand({
+      Bucket: config.r2.bucket,
+      Key: sourceObjectKey
+    }));
+    if (!response.Body) throw new Error("Oggetto R2 sorgente vuoto");
+    await pipeline(response.Body, createWriteStream(localSource));
+    return localSource;
+  }
+
+  if (sourceObjectKey && !r2) {
+    throw new Error("Sorgente su R2 ma configurazione R2 worker non disponibile");
+  }
+
+  return pathInside(config.inputRoot, job.data?.sourcePath);
+}
+
 async function postWebhook(payload) {
   const body = JSON.stringify(payload);
   const signature = config.webhookSecret
@@ -309,14 +342,14 @@ async function postWebhook(payload) {
 
 async function processVideo(job) {
   const videoId = safeId(job.data?.videoId);
-  const sourcePath = pathInside(config.inputRoot, job.data?.sourcePath);
+  const sourcePath = await resolveSourcePath(job, videoId);
   const finalDir = pathInside(config.outputRoot, videoId);
   const tempDir = pathInside(config.outputRoot, `.tmp-${videoId}-${job.id}`);
 
   const sourceStat = await stat(sourcePath);
   if (!sourceStat.isFile()) throw new Error("sourcePath non è un file");
-  if (path.extname(sourcePath).toLowerCase() !== ".mp4") {
-    throw new Error("Sono accettati solo file sorgente .mp4");
+  if (![".mp4", ".mov", ".mkv"].includes(path.extname(sourcePath).toLowerCase())) {
+    throw new Error("Sono accettati solo file sorgente MP4, MOV o MKV");
   }
 
   log("info", "Transcodifica iniziata", { jobId: job.id, videoId, sourcePath });
