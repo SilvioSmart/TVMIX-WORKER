@@ -20,6 +20,11 @@ function required(name) {
   return value;
 }
 
+function optional(name) {
+  const value = process.env[name]?.trim();
+  return value || "";
+}
+
 export const config = Object.freeze({
   redisUrl: process.env.REDIS_URL ?? "redis://127.0.0.1:6379",
   queueName: process.env.QUEUE_NAME ?? "tvmix-video-transcoding",
@@ -36,5 +41,13 @@ export const config = Object.freeze({
   videoThreads: integer("FFMPEG_VIDEO_THREADS", 1),
   ffmpegPreset: process.env.FFMPEG_PRESET ?? "veryfast",
   segmentSeconds: integer("HLS_SEGMENT_SECONDS", 6, 2),
-  deleteSourceAfterSuccess: boolean("DELETE_SOURCE_AFTER_SUCCESS")
+  deleteSourceAfterSuccess: boolean("DELETE_SOURCE_AFTER_SUCCESS"),
+  r2: {
+    endpoint: optional("R2_ENDPOINT"),
+    accessKeyId: optional("R2_ACCESS_KEY_ID"),
+    secretAccessKey: optional("R2_SECRET_ACCESS_KEY"),
+    bucket: optional("R2_BUCKET"),
+    prefix: (process.env.R2_PREFIX ?? "tvmix-media").trim().replace(/^\/+|\/+$/g, ""),
+    publicUrl: optional("R2_PUBLIC_URL").replace(/\/+$/, "")
+  }
 });

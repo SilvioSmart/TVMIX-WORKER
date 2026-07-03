@@ -1,7 +1,9 @@
 import { spawn } from "node:child_process";
 import crypto from "node:crypto";
+import { createReadStream } from "node:fs";
 import {
   access,
+  readdir,
   mkdir,
   rename,
   rm,
@@ -9,6 +11,7 @@ import {
   unlink
 } from "node:fs/promises";
 import path from "node:path";
+import { PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { Queue, Worker } from "bullmq";
 import IORedis from "ioredis";
 import { config } from "./config.js";
@@ -27,6 +30,25 @@ const queue = new Queue(config.queueName, { connection });
 
 // Vale anche se, per errore, vengono avviate più istanze del servizio.
 await queue.setGlobalConcurrency(1);
+
+const r2Enabled = Boolean(
+  config.r2.endpoint &&
+  config.r2.accessKeyId &&
+  config.r2.secretAccessKey &&
+  config.r2.bucket &&
+  config.r2.publicUrl
+);
+
+const r2 = r2Enabled
+  ? new S3Client({
+      region: "auto",
+      endpoint: config.r2.endpoint,
+      credentials: {
+        accessKeyId: config.r2.accessKeyId,
+        secretAccessKey: config.r2.secretAccessKey
+      }
+    })
+  : null;
 
 function log(level, message, fields = {}) {
   console.log(JSON.stringify({
@@ -197,6 +219,59 @@ function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
+function r2Key(relativePath) {
+  const normalized = relativePath.replace(/^\/+/, "");
+  return config.r2.prefix ? `${config.r2.prefix}/${normalized}` : normalized;
+}
+
+function contentTypeFor(filePath) {
+  const extension = path.extname(filePath).toLowerCase();
+  if (extension === ".m3u8") return "application/vnd.apple.mpegurl";
+  if (extension === ".ts") return "video/mp2t";
+  return "application/octet-stream";
+}
+
+async function listFiles(root, current = root) {
+  const entries = await readdir(current, { withFileTypes: true });
+  const files = [];
+  for (const entry of entries) {
+    const absolute = path.join(current, entry.name);
+    if (entry.isDirectory()) files.push(...await listFiles(root, absolute));
+    else if (entry.isFile()) files.push(absolute);
+  }
+  return files;
+}
+
+async function uploadHlsToR2(videoId, finalDir) {
+  if (!r2) return null;
+
+  const files = await listFiles(finalDir);
+  for (const file of files) {
+    const relative = path.relative(finalDir, file).split(path.sep).join("/");
+    const key = r2Key(`hls/${videoId}/${relative}`);
+    await r2.send(new PutObjectCommand({
+      Bucket: config.r2.bucket,
+      Key: key,
+      Body: createReadStream(file),
+      ContentType: contentTypeFor(file),
+      CacheControl: file.endsWith(".m3u8")
+        ? "public, max-age=60"
+        : "public, max-age=31536000, immutable"
+    }));
+  }
+
+  const masterPath = path.join(finalDir, "master.m3u8");
+  await r2.send(new PutObjectCommand({
+    Bucket: config.r2.bucket,
+    Key: r2Key(`master.m3u8/${videoId}.m3u8`),
+    Body: createReadStream(masterPath),
+    ContentType: "application/vnd.apple.mpegurl",
+    CacheControl: "public, max-age=60"
+  }));
+
+  return `${config.r2.publicUrl}/${r2Key(`hls/${videoId}/master.m3u8`)}`;
+}
+
 async function postWebhook(payload) {
   const body = JSON.stringify(payload);
   const signature = config.webhookSecret
@@ -256,7 +331,9 @@ async function processVideo(job) {
     await rm(finalDir, { recursive: true, force: true });
     await rename(tempDir, finalDir);
 
-    const masterUrl = `${config.publicBaseUrl}/${encodeURIComponent(videoId)}/master.m3u8`;
+    await job.updateProgress({ phase: "uploading-r2" });
+    const r2MasterUrl = await uploadHlsToR2(videoId, finalDir);
+    const masterUrl = r2MasterUrl ?? `${config.publicBaseUrl}/${encodeURIComponent(videoId)}/master.m3u8`;
     const payload = {
       event: "video.ready",
       videoId,
