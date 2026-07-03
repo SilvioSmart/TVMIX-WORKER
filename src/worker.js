@@ -69,8 +69,9 @@ function safeId(value) {
 }
 
 function pathInside(root, candidate) {
-  const absolute = path.resolve(candidate);
-  const relative = path.relative(root, absolute);
+  const absoluteRoot = path.resolve(root);
+  const absolute = path.resolve(absoluteRoot, candidate);
+  const relative = path.relative(absoluteRoot, absolute);
   if (relative.startsWith("..") || path.isAbsolute(relative)) {
     throw new Error(`Percorso fuori dalla root consentita: ${absolute}`);
   }
