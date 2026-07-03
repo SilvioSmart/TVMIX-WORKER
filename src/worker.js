@@ -395,12 +395,18 @@ async function processVideo(job) {
     if (config.deleteSourceAfterSuccess) {
       await unlink(sourcePath);
     }
+    if (job.data?.sourceObjectKey) {
+      await unlink(sourcePath).catch(() => {});
+    }
 
     await job.updateProgress({ phase: "completed", percent: 100 });
     log("info", "Transcodifica completata", { jobId: job.id, videoId, masterUrl });
     return payload;
   } catch (error) {
     await rm(tempDir, { recursive: true, force: true });
+    if (job.data?.sourceObjectKey) {
+      await unlink(sourcePath).catch(() => {});
+    }
     throw error;
   }
 }
